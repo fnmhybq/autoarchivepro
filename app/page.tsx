@@ -84,7 +84,7 @@ export default function FileArchiveSystem() {
     if (files.length === 0) return
 
     const partCounts = files.map(file => file.parts.length)
-    const uniqueCounts = [...new Set(partCounts)]
+    const uniqueCounts = Array.from(new Set(partCounts))
     
     if (uniqueCounts.length === 1) {
       setSeparatorValid(true)
