@@ -3,5 +3,5 @@ echo Building project...
 call npm run build
 echo Creating dist directory...
 if exist dist rmdir /s /q dist
-mklink /D dist out
+xcopy out dist /E /I /H /Y
 echo Build completed!

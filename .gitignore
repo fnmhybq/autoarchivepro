@@ -10,6 +10,7 @@ build/
 
 # Static export
 # out/ - 注释掉，因为需要部署静态文件
+# dist/ - 注释掉，因为需要部署静态文件
 
 # Environment variables
 .env
