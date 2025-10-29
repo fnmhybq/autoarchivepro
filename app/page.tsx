@@ -41,7 +41,12 @@ interface FileInfo {
 }
 
 interface FolderStructure {
-  [key: string]: FileInfo[]
+  [key: string]: FileInfo[] | FolderStructure
+}
+
+interface ClassificationConfig {
+  levelCount: number
+  fieldIndices: number[]
 }
 
 export default function FileArchiveSystem() {
@@ -49,7 +54,10 @@ export default function FileArchiveSystem() {
   const [files, setFiles] = useState<FileInfo[]>([])
   const [separator, setSeparator] = useState('_')
   const [separatorValid, setSeparatorValid] = useState<boolean | null>(null)
-  const [firstLevelIndex, setFirstLevelIndex] = useState<number | null>(null)
+  const [classificationConfig, setClassificationConfig] = useState<ClassificationConfig>({
+    levelCount: 1,
+    fieldIndices: []
+  })
   const [folderStructure, setFolderStructure] = useState<FolderStructure>({})
   const [isProcessing, setIsProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -96,18 +104,32 @@ export default function FileArchiveSystem() {
 
   // 生成文件夹结构
   const generateFolderStructure = useCallback(() => {
-    if (firstLevelIndex === null) return
+    if (classificationConfig.fieldIndices.length === 0) return
 
     const structure: FolderStructure = {}
     
     files.forEach(fileInfo => {
-      const firstLevelKey = fileInfo.parts[firstLevelIndex] || '未分类'
+      let currentLevel = structure
       
-      if (!structure[firstLevelKey]) {
-        structure[firstLevelKey] = []
+      // 根据配置的级别数量创建多级文件夹结构
+      for (let i = 0; i < classificationConfig.levelCount; i++) {
+        const fieldIndex = classificationConfig.fieldIndices[i]
+        const folderName = fileInfo.parts[fieldIndex] || '未分类'
+        
+        if (i === classificationConfig.levelCount - 1) {
+          // 最后一级，存储文件
+          if (!currentLevel[folderName]) {
+            currentLevel[folderName] = []
+          }
+          (currentLevel[folderName] as FileInfo[]).push(fileInfo)
+        } else {
+          // 中间级别，创建子文件夹
+          if (!currentLevel[folderName]) {
+            currentLevel[folderName] = {}
+          }
+          currentLevel = currentLevel[folderName] as FolderStructure
+        }
       }
-      
-      structure[firstLevelKey].push(fileInfo)
     })
     
     setFolderStructure(structure)
@@ -117,9 +139,29 @@ export default function FileArchiveSystem() {
     const firstLevelKeys = Object.keys(structure)
     trackFileClassification(
       firstLevelKeys.join(','), 
-      ''
+      `级别数: ${classificationConfig.levelCount}`
     )
-  }, [files, firstLevelIndex])
+  }, [files, classificationConfig])
+
+  // 递归处理文件夹结构
+  const processFolderStructure = async (zipFolder: JSZip, structure: FolderStructure, processedFiles: { count: number }) => {
+    for (const [folderName, content] of Object.entries(structure)) {
+      if (Array.isArray(content)) {
+        // 这是文件列表
+        const subFolder = zipFolder.folder(folderName)
+        for (const fileInfo of content) {
+          const fileContent = await fileInfo.file.arrayBuffer()
+          subFolder?.file(fileInfo.name, fileContent)
+          processedFiles.count++
+          setProgress(Math.round((processedFiles.count / files.length) * 100))
+        }
+      } else {
+        // 这是子文件夹结构
+        const subFolder = zipFolder.folder(folderName)
+        await processFolderStructure(subFolder!, content, processedFiles)
+      }
+    }
+  }
 
   // 打包下载
   const handleDownload = async () => {
@@ -128,18 +170,9 @@ export default function FileArchiveSystem() {
     
     try {
       const zip = new JSZip()
-      let processedFiles = 0
+      const processedFiles = { count: 0 }
       
-      for (const [firstLevel, fileInfos] of Object.entries(folderStructure)) {
-        const firstLevelFolder = zip.folder(firstLevel)
-        
-        for (const fileInfo of fileInfos) {
-          const fileContent = await fileInfo.file.arrayBuffer()
-          firstLevelFolder?.file(fileInfo.name, fileContent)
-          processedFiles++
-          setProgress(Math.round((processedFiles / files.length) * 100))
-        }
-      }
+      await processFolderStructure(zip, folderStructure, processedFiles)
       
       const zipBlob = await zip.generateAsync({ type: 'blob' })
       saveAs(zipBlob, '分类归档文件.zip')
@@ -157,14 +190,29 @@ export default function FileArchiveSystem() {
     }
   }
 
+  // 递归渲染文件夹结构
+  const renderFolderStructureRecursive = (structure: FolderStructure, level: number = 0): string => {
+    const indent = '  '.repeat(level)
+    let result = ''
+    
+    for (const [folderName, content] of Object.entries(structure)) {
+      if (Array.isArray(content)) {
+        // 这是文件列表
+        const fileNames = content.map(f => f.name).join(', ')
+        result += `${indent}${folderName}/ (${content.length}个文件: ${fileNames})\n`
+      } else {
+        // 这是子文件夹结构
+        result += `${indent}${folderName}/\n`
+        result += renderFolderStructureRecursive(content, level + 1)
+      }
+    }
+    
+    return result
+  }
+
   // 渲染文件夹结构
   const renderFolderStructure = () => {
-    const structureText = Object.entries(folderStructure).map(([firstLevel, fileInfos]) => {
-      const fileNames = fileInfos.map(f => f.name).join(', ')
-      return `${firstLevel}/ (${fileInfos.length}个文件: ${fileNames})`
-    }).join('\n')
-    
-    return structureText
+    return renderFolderStructureRecursive(folderStructure)
   }
 
   const steps = [
@@ -277,49 +325,121 @@ export default function FileArchiveSystem() {
         <Card title="步骤3: 分类设置" className="step-content">
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <Alert
-              message="选择分类字段"
-              description="请选择用于分类的字段索引（从0开始）"
+              message="多级分类设置"
+              description="请选择分类级别数量和对应的字段索引（从0开始）"
               type="info"
               showIcon
             />
             
             <div>
-              <Text strong>字段索引：</Text>
+              <Text strong>分类级别数量：</Text>
               <InputNumber
-                min={0}
-                max={files[0]?.parts.length - 1 || 0}
-                value={firstLevelIndex}
-                onChange={(value) => setFirstLevelIndex(value)}
-                placeholder="输入字段索引"
-                style={{ width: '200px', marginLeft: '12px' }}
+                min={1}
+                max={5}
+                value={classificationConfig.levelCount}
+                onChange={(value) => {
+                  const newLevelCount = value || 1
+                  const newFieldIndices = Array.from({ length: newLevelCount }, (_, i) => 
+                    classificationConfig.fieldIndices[i] || 0
+                  )
+                  setClassificationConfig({
+                    levelCount: newLevelCount,
+                    fieldIndices: newFieldIndices
+                  })
+                }}
+                style={{ width: '120px', marginLeft: '12px' }}
               />
+              <Text type="secondary" style={{ marginLeft: '8px' }}>
+                (支持1-5级分类)
+              </Text>
+            </div>
+            
+            <div>
+              <Text strong>各级字段索引设置：</Text>
+              <div style={{ marginTop: '12px' }}>
+                {Array.from({ length: classificationConfig.levelCount }, (_, i) => (
+                  <div key={i} className="classification-level">
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                      <Text strong style={{ width: '80px', color: '#1890ff' }}>第{i + 1}级：</Text>
+                      <InputNumber
+                        min={0}
+                        max={files[0]?.parts.length - 1 || 0}
+                        value={classificationConfig.fieldIndices[i]}
+                        onChange={(value) => {
+                          const newFieldIndices = [...classificationConfig.fieldIndices]
+                          newFieldIndices[i] = value || 0
+                          setClassificationConfig({
+                            ...classificationConfig,
+                            fieldIndices: newFieldIndices
+                          })
+                        }}
+                        className="field-index-input"
+                        style={{ width: '100px' }}
+                      />
+                      <Text type="secondary" style={{ marginLeft: '8px' }}>
+                        对应字段: <span className="preview-path">{files[0]?.parts[classificationConfig.fieldIndices[i]] || '未分类'}</span>
+                      </Text>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666' }}>
+                      可用字段: {files[0]?.parts.map((part, idx) => `${idx}:${part}`).join(', ') || '无'}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
             
             <div>
               <Text strong>预览效果：</Text>
-              <div style={{ marginTop: '8px' }}>
-                {files.slice(0, 3).map((fileInfo, index) => (
-                  <div key={index} style={{ marginBottom: '4px' }}>
-                    <Text code>{fileInfo.name}</Text>
-                    <Text type="secondary">
-                      → 将放入文件夹: {fileInfo.parts[firstLevelIndex || 0] || '未分类'}
-                    </Text>
-                  </div>
-                ))}
+              <div style={{ marginTop: '8px', padding: '12px', background: '#f9f9f9', borderRadius: '6px', border: '1px solid #e8e8e8' }}>
+                {files.slice(0, 3).map((fileInfo, index) => {
+                  const folderPath = classificationConfig.fieldIndices
+                    .slice(0, classificationConfig.levelCount)
+                    .map(idx => fileInfo.parts[idx] || '未分类')
+                    .join('/')
+                  
+                  return (
+                    <div key={index} style={{ marginBottom: '8px', padding: '8px', background: 'white', borderRadius: '4px', border: '1px solid #f0f0f0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+                        <FileTextOutlined style={{ marginRight: '8px', color: '#1890ff' }} />
+                        <Text code style={{ fontSize: '13px' }}>{fileInfo.name}</Text>
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#666' }}>
+                        <Text type="secondary">→ 将放入文件夹: </Text>
+                        <span className="preview-path">{folderPath}</span>
+                      </div>
+                    </div>
+                  )
+                })}
                 {files.length > 3 && (
-                  <Text type="secondary">... 还有 {files.length - 3} 个文件</Text>
+                  <div style={{ textAlign: 'center', padding: '8px', color: '#999' }}>
+                    <Text type="secondary">... 还有 {files.length - 3} 个文件将按相同规则分类</Text>
+                  </div>
                 )}
               </div>
             </div>
             
-            <Button 
-              type="primary" 
-              size="large" 
-              onClick={generateFolderStructure}
-              disabled={firstLevelIndex === null}
-            >
-              生成分类结构
-            </Button>
+            <Space size="large">
+              <Button 
+                type="primary" 
+                size="large" 
+                onClick={generateFolderStructure}
+                disabled={classificationConfig.fieldIndices.length === 0}
+              >
+                生成分类结构
+              </Button>
+              
+              <Button 
+                size="large" 
+                onClick={() => {
+                  setClassificationConfig({
+                    levelCount: 1,
+                    fieldIndices: [0]
+                  })
+                }}
+              >
+                重置配置
+              </Button>
+            </Space>
           </Space>
         </Card>
       )}
