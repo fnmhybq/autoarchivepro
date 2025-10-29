@@ -41,9 +41,7 @@ interface FileInfo {
 }
 
 interface FolderStructure {
-  [key: string]: {
-    [key: string]: FileInfo[]
-  }
+  [key: string]: FileInfo[]
 }
 
 export default function FileArchiveSystem() {
@@ -52,7 +50,6 @@ export default function FileArchiveSystem() {
   const [separator, setSeparator] = useState('_')
   const [separatorValid, setSeparatorValid] = useState<boolean | null>(null)
   const [firstLevelIndex, setFirstLevelIndex] = useState<number | null>(null)
-  const [secondLevelIndex, setSecondLevelIndex] = useState<number | null>(null)
   const [folderStructure, setFolderStructure] = useState<FolderStructure>({})
   const [isProcessing, setIsProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -99,35 +96,30 @@ export default function FileArchiveSystem() {
 
   // 生成文件夹结构
   const generateFolderStructure = useCallback(() => {
-    if (firstLevelIndex === null || secondLevelIndex === null) return
+    if (firstLevelIndex === null) return
 
     const structure: FolderStructure = {}
     
     files.forEach(fileInfo => {
       const firstLevelKey = fileInfo.parts[firstLevelIndex] || '未分类'
-      const secondLevelKey = fileInfo.parts[secondLevelIndex] || '未分类'
       
       if (!structure[firstLevelKey]) {
-        structure[firstLevelKey] = {}
-      }
-      if (!structure[firstLevelKey][secondLevelKey]) {
-        structure[firstLevelKey][secondLevelKey] = []
+        structure[firstLevelKey] = []
       }
       
-      structure[firstLevelKey][secondLevelKey].push(fileInfo)
+      structure[firstLevelKey].push(fileInfo)
     })
     
     setFolderStructure(structure)
-    setCurrentStep(4)
+    setCurrentStep(3)
     
     // 跟踪文件分类事件
     const firstLevelKeys = Object.keys(structure)
-    const secondLevelKeys = Object.values(structure).flatMap(Object.keys)
     trackFileClassification(
       firstLevelKeys.join(','), 
-      secondLevelKeys.join(',')
+      ''
     )
-  }, [files, firstLevelIndex, secondLevelIndex])
+  }, [files, firstLevelIndex])
 
   // 打包下载
   const handleDownload = async () => {
@@ -138,18 +130,14 @@ export default function FileArchiveSystem() {
       const zip = new JSZip()
       let processedFiles = 0
       
-      for (const [firstLevel, secondLevels] of Object.entries(folderStructure)) {
+      for (const [firstLevel, fileInfos] of Object.entries(folderStructure)) {
         const firstLevelFolder = zip.folder(firstLevel)
         
-        for (const [secondLevel, fileInfos] of Object.entries(secondLevels)) {
-          const secondLevelFolder = firstLevelFolder?.folder(secondLevel)
-          
-          for (const fileInfo of fileInfos) {
-            const fileContent = await fileInfo.file.arrayBuffer()
-            secondLevelFolder?.file(fileInfo.name, fileContent)
-            processedFiles++
-            setProgress(Math.round((processedFiles / files.length) * 100))
-          }
+        for (const fileInfo of fileInfos) {
+          const fileContent = await fileInfo.file.arrayBuffer()
+          firstLevelFolder?.file(fileInfo.name, fileContent)
+          processedFiles++
+          setProgress(Math.round((processedFiles / files.length) * 100))
         }
       }
       
@@ -171,13 +159,9 @@ export default function FileArchiveSystem() {
 
   // 渲染文件夹结构
   const renderFolderStructure = () => {
-    const structureText = Object.entries(folderStructure).map(([firstLevel, secondLevels]) => {
-      const secondLevelText = Object.entries(secondLevels).map(([secondLevel, fileInfos]) => {
-        const fileNames = fileInfos.map(f => f.name).join(', ')
-        return `    └── ${secondLevel}/ (${fileInfos.length}个文件: ${fileNames})`
-      }).join('\n')
-      
-      return `${firstLevel}/\n${secondLevelText}`
+    const structureText = Object.entries(folderStructure).map(([firstLevel, fileInfos]) => {
+      const fileNames = fileInfos.map(f => f.name).join(', ')
+      return `${firstLevel}/ (${fileInfos.length}个文件: ${fileNames})`
     }).join('\n')
     
     return structureText
@@ -193,12 +177,8 @@ export default function FileArchiveSystem() {
       description: '验证文件分隔符格式'
     },
     {
-      title: '一级分类',
-      description: '选择一级分类字段'
-    },
-    {
-      title: '二级分类',
-      description: '选择二级分类字段'
+      title: '选择分类',
+      description: '选择分类字段'
     },
     {
       title: '预览下载',
@@ -292,13 +272,13 @@ export default function FileArchiveSystem() {
         </Card>
       )}
 
-      {/* 步骤3: 一级分类 */}
+      {/* 步骤3: 分类设置 */}
       {currentStep === 2 && (
-        <Card title="步骤3: 一级分类设置" className="step-content">
+        <Card title="步骤3: 分类设置" className="step-content">
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <Alert
-              message="选择一级分类字段"
-              description="请选择用于一级分类的字段索引（从0开始）"
+              message="选择分类字段"
+              description="请选择用于分类的字段索引（从0开始）"
               type="info"
               showIcon
             />
@@ -335,60 +315,8 @@ export default function FileArchiveSystem() {
             <Button 
               type="primary" 
               size="large" 
-              onClick={() => setCurrentStep(3)}
-              disabled={firstLevelIndex === null}
-            >
-              确认一级分类
-            </Button>
-          </Space>
-        </Card>
-      )}
-
-      {/* 步骤4: 二级分类 */}
-      {currentStep === 3 && (
-        <Card title="步骤4: 二级分类设置" className="step-content">
-          <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <Alert
-              message="选择二级分类字段"
-              description="请选择用于二级分类的字段索引（从0开始）"
-              type="info"
-              showIcon
-            />
-            
-            <div>
-              <Text strong>字段索引：</Text>
-              <InputNumber
-                min={0}
-                max={files[0]?.parts.length - 1 || 0}
-                value={secondLevelIndex}
-                onChange={(value) => setSecondLevelIndex(value)}
-                placeholder="输入字段索引"
-                style={{ width: '200px', marginLeft: '12px' }}
-              />
-            </div>
-            
-            <div>
-              <Text strong>预览效果：</Text>
-              <div style={{ marginTop: '8px' }}>
-                {files.slice(0, 3).map((fileInfo, index) => (
-                  <div key={index} style={{ marginBottom: '4px' }}>
-                    <Text code>{fileInfo.name}</Text>
-                    <Text type="secondary">
-                      → {fileInfo.parts[firstLevelIndex || 0]}/{fileInfo.parts[secondLevelIndex || 0]}
-                    </Text>
-                  </div>
-                ))}
-                {files.length > 3 && (
-                  <Text type="secondary">... 还有 {files.length - 3} 个文件</Text>
-                )}
-              </div>
-            </div>
-            
-            <Button 
-              type="primary" 
-              size="large" 
               onClick={generateFolderStructure}
-              disabled={secondLevelIndex === null}
+              disabled={firstLevelIndex === null}
             >
               生成分类结构
             </Button>
@@ -396,9 +324,9 @@ export default function FileArchiveSystem() {
         </Card>
       )}
 
-      {/* 步骤5: 预览下载 */}
-      {currentStep === 4 && (
-        <Card title="步骤5: 预览并下载" className="step-content">
+      {/* 步骤4: 预览下载 */}
+      {currentStep === 3 && (
+        <Card title="步骤4: 预览并下载" className="step-content">
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <Alert
               message="分类完成"
