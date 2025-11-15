@@ -36,6 +36,11 @@ jobs:
         env:
           NODE_ENV: production
           BASE_PATH: '/autoarchivepro'
+      
+      - name: Verify build output
+        run: |
+          echo "Checking build output..."
+          grep -o "选择分类\|一级分类\|二级分类" out/index.html | head -5 || echo "No match found"
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
