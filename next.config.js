@@ -7,10 +7,6 @@ const nextConfig = {
   trailingSlash: true,
   images: {
     unoptimized: true
-  },
-  // 添加缓存控制，确保浏览器获取最新版本
-  generateBuildId: async () => {
-    return `build-${Date.now()}`
   }
 }
 
