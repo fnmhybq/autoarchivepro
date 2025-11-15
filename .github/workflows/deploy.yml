@@ -40,15 +40,26 @@ jobs:
       - name: Verify build output
         run: |
           echo "=== 验证构建输出 ==="
+          echo "检查步骤名称..."
+          echo "--- 所有步骤标题 ---"
+          grep -o 'ant-steps-item-title">[^<]*' out/index.html || echo "未找到步骤"
+          echo ""
+          echo "--- 验证'选择分类' ---"
           if grep -q "选择分类" out/index.html; then
             echo "✓ 找到'选择分类' - 构建正确"
-            grep -o "选择分类" out/index.html | wc -l
+            COUNT=$(grep -o "选择分类" out/index.html | wc -l)
+            echo "出现次数: $COUNT"
           else
-            echo "✗ 未找到'选择分类'"
+            echo "✗ 错误: 未找到'选择分类'"
+            echo "实际内容:"
+            grep -o 'ant-steps-item-title">[^<]*' out/index.html || echo "无"
             exit 1
           fi
+          echo ""
+          echo "--- 检查旧版本 ---"
           if grep -q "一级分类\|二级分类" out/index.html; then
-            echo "✗ 警告: 发现旧版本步骤名称"
+            echo "✗ 错误: 发现旧版本步骤名称"
+            grep -o "一级分类\|二级分类" out/index.html
             exit 1
           else
             echo "✓ 未发现旧版本步骤名称"
